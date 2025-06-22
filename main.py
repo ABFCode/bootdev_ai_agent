@@ -14,7 +14,7 @@ def main():
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
 
-
+    
     verbose = "--verbose" in sys.argv
 
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
@@ -32,33 +32,50 @@ def main():
     if verbose:
         print(f"User prompt: {user_prompt}")
     
-    generate_content(client, messages, verbose)
+    response = generate_content(client, messages, verbose)
+    print(f"Final Response is: {response}")
 
 
 
 def generate_content(client, messages, verbose):
-
-    response = client.models.generate_content(
+    
+    MAX_ITERATIONS = 10
+    iterations = 0
+    response: types.GenerateContentResponse = client.models.generate_content(
         model='gemini-2.0-flash-001', contents=messages,
         config=types.GenerateContentConfig(system_instruction=system_prompt, tools=[available_functions])
     )
 
-    if verbose:
-        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
-    
+    while response.function_calls and iterations < MAX_ITERATIONS:
+        if verbose:
+            print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+            print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+        
+        for candidate in response.candidates:
+            print(f"Candidate content is {candidate.content}")
+            messages.append(f"Candidate Content: {candidate.content}") 
+        
+        for function_call_part in response.function_calls:
+            print(f"Calling function: {function_call_part.name}({function_call_part.args})")
+            function_call_result = call_function(function_call_part, True)
+            messages.append(f"Functional call result: {function_call_result}")
+
+            if not function_call_result.parts[0].function_response.response:
+                raise Exception("Bad function response")
+            if verbose:
+                print(f"-> {function_call_result.parts[0].function_response.response}")
+        
+        iterations += 1
+        
+        response: types.GenerateContentResponse = client.models.generate_content(
+            model='gemini-2.0-flash-001', contents=messages,
+            config=types.GenerateContentConfig(system_instruction=system_prompt, tools=[available_functions])
+        )
+
     if not response.function_calls:
         return response.text
-    
-    for function_call_part in response.function_calls:
-        print(f"Calling function: {function_call_part.name}({function_call_part.args})")
-        function_call_result = call_function(function_call_part, True)
-
-        if not function_call_result.parts[0].function_response.response:
-            raise Exception("Bad function response")
-        if verbose:
-            print(f"-> {function_call_result.parts[0].function_response.response}")
-    
+            
+        
 
 if __name__ == "__main__":
     main()
